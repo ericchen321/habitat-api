@@ -12,21 +12,23 @@ import time
 from math import pi
 
 import numpy as np
+import orbslam2
 import PIL
 import requests
 import torch
 import torch.nn.functional as F
 
 import habitat
-import orbslam2
-from habitat import SimulatorActions
 from habitat.config.default import get_config
+from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from habitat_baselines.config.default import get_config as cfg_baseline
 from habitat_baselines.slambased.mappers import DirectDepthMapper
 from habitat_baselines.slambased.monodepth import MonoDepthEstimator
 from habitat_baselines.slambased.path_planners import DifferentiableStarPlanner
 from habitat_baselines.slambased.reprojection import (
     angle_to_pi_2_minus_pi_2 as norm_ang,
+)
+from habitat_baselines.slambased.reprojection import (
     get_direction,
     get_distance,
     habitat_goalpos_to_mapgoal_pos,
@@ -35,6 +37,8 @@ from habitat_baselines.slambased.reprojection import (
     project_tps_into_worldmap,
 )
 from habitat_baselines.slambased.utils import generate_2dgrid
+
+GOAL_SENSOR_UUID = "pointgoal_with_gps_compass"
 
 
 def download(url, filename):
@@ -70,16 +74,16 @@ def make_good_config_for_orbslam2(config):
     config.SIMULATOR.RGB_SENSOR.HEIGHT = 256
     config.SIMULATOR.DEPTH_SENSOR.WIDTH = 256
     config.SIMULATOR.DEPTH_SENSOR.HEIGHT = 256
-    config.BASELINE.ORBSLAM2.CAMERA_HEIGHT = config.SIMULATOR.DEPTH_SENSOR.POSITION[
+    config.TRAINER.ORBSLAM2.CAMERA_HEIGHT = config.SIMULATOR.DEPTH_SENSOR.POSITION[
         1
     ]
-    config.BASELINE.ORBSLAM2.H_OBSTACLE_MIN = (
-        0.3 * config.BASELINE.ORBSLAM2.CAMERA_HEIGHT
+    config.TRAINER.ORBSLAM2.H_OBSTACLE_MIN = (
+        0.3 * config.TRAINER.ORBSLAM2.CAMERA_HEIGHT
     )
-    config.BASELINE.ORBSLAM2.H_OBSTACLE_MAX = (
-        1.0 * config.BASELINE.ORBSLAM2.CAMERA_HEIGHT
+    config.TRAINER.ORBSLAM2.H_OBSTACLE_MAX = (
+        1.0 * config.TRAINER.ORBSLAM2.CAMERA_HEIGHT
     )
-    config.BASELINE.ORBSLAM2.MIN_PTS_IN_OBSTACLE = (
+    config.TRAINER.ORBSLAM2.MIN_PTS_IN_OBSTACLE = (
         config.SIMULATOR.DEPTH_SENSOR.WIDTH / 2.0
     )
     return
@@ -107,7 +111,7 @@ class RandomAgent(object):
         return
 
     def is_goal_reached(self):
-        dist = self.obs["pointgoal"][0]
+        dist = self.obs[GOAL_SENSOR_UUID][0]
         return dist <= self.dist_threshold_to_stop
 
     def act(self, habitat_observation=None, random_prob=1.0):
@@ -115,10 +119,10 @@ class RandomAgent(object):
         # Act
         # Check if we are done
         if self.is_goal_reached():
-            action = SimulatorActions.STOP
+            action = HabitatSimActions.STOP
         else:
             action = random.randint(0, self.num_actions - 1)
-        return action
+        return {"action": action}
 
 
 class BlindAgent(RandomAgent):
@@ -130,22 +134,22 @@ class BlindAgent(RandomAgent):
         return
 
     def decide_what_to_do(self):
-        distance_to_goal = self.obs["pointgoal"][0]
-        angle_to_goal = norm_ang(np.array(self.obs["pointgoal"][1]))
-        command = SimulatorActions.STOP
+        distance_to_goal = self.obs[GOAL_SENSOR_UUID][0]
+        angle_to_goal = norm_ang(np.array(self.obs[GOAL_SENSOR_UUID][1]))
+        command = HabitatSimActions.STOP
         if distance_to_goal <= self.pos_th:
             return command
         if abs(angle_to_goal) < self.angle_th:
-            command = SimulatorActions.MOVE_FORWARD
+            command = HabitatSimActions.MOVE_FORWARD
         else:
             if (angle_to_goal > 0) and (angle_to_goal < pi):
-                command = SimulatorActions.TURN_LEFT
+                command = HabitatSimActions.TURN_LEFT
             elif angle_to_goal > pi:
-                command = SimulatorActions.TURN_RIGHT
+                command = HabitatSimActions.TURN_RIGHT
             elif (angle_to_goal < 0) and (angle_to_goal > -pi):
-                command = SimulatorActions.TURN_RIGHT
+                command = HabitatSimActions.TURN_RIGHT
             else:
-                command = SimulatorActions.TURN_LEFT
+                command = HabitatSimActions.TURN_LEFT
 
         return command
 
@@ -153,7 +157,7 @@ class BlindAgent(RandomAgent):
         self.update_internal_state(habitat_observation)
         # Act
         if self.is_goal_reached():
-            return SimulatorActions.STOP
+            return HabitatSimActions.STOP
         command = self.decide_what_to_do()
         random_action = random.randint(0, self.num_actions - 1)
         act_randomly = np.random.uniform(0, 1, 1) < random_prob
@@ -161,7 +165,7 @@ class BlindAgent(RandomAgent):
             action = random_action
         else:
             action = command
-        return action
+        return {"action": action}
 
 
 class ORBSLAM2Agent(RandomAgent):
@@ -266,7 +270,7 @@ class ORBSLAM2Agent(RandomAgent):
                     .view(4, 4)
                     .to(self.device),
                 )
-                if self.action_history[-1] == SimulatorActions.MOVE_FORWARD:
+                if self.action_history[-1] == HabitatSimActions.MOVE_FORWARD:
                     self.unseen_obstacle = (
                         previous_step.item() <= 0.001
                     )  # hardcoded threshold for not moving
@@ -330,9 +334,9 @@ class ORBSLAM2Agent(RandomAgent):
         )
         success = self.is_goal_reached()
         if success:
-            action = SimulatorActions.STOP
+            action = HabitatSimActions.STOP
             self.action_history.append(action)
-            return action
+            return {"action": action}
         # Plan action
         t = time.time()
         self.planned2Dpath, self.planned_waypoints = self.plan_path()
@@ -357,7 +361,7 @@ class ORBSLAM2Agent(RandomAgent):
         if self.timing:
             print(time.time() - t, " s, get action")
         self.action_history.append(action)
-        return action
+        return {"action": action}
 
     def is_waypoint_good(self, pose6d):
         p_init = self.pose6D.squeeze()
@@ -400,7 +404,9 @@ class ORBSLAM2Agent(RandomAgent):
 
     def set_offset_to_goal(self, observation):
         self.offset_to_goal = (
-            torch.from_numpy(observation["pointgoal"]).float().to(self.device)
+            torch.from_numpy(observation[GOAL_SENSOR_UUID])
+            .float()
+            .to(self.device)
         )
         self.estimatedGoalPos2D = habitat_goalpos_to_mapgoal_pos(
             self.offset_to_goal,
@@ -482,7 +488,7 @@ class ORBSLAM2Agent(RandomAgent):
         return path, planned_waypoints
 
     def planner_prediction_to_command(self, p_next):
-        command = SimulatorActions.STOP
+        command = HabitatSimActions.STOP
         p_init = self.pose6D.squeeze()
         d_angle_rot_th = self.angle_th
         pos_th = self.pos_th
@@ -492,27 +498,27 @@ class ORBSLAM2Agent(RandomAgent):
             get_direction(p_init, p_next, ang_th=d_angle_rot_th, pos_th=pos_th)
         )
         if abs(d_angle) < d_angle_rot_th:
-            command = SimulatorActions.MOVE_FORWARD
+            command = HabitatSimActions.MOVE_FORWARD
         else:
             if (d_angle > 0) and (d_angle < pi):
-                command = SimulatorActions.TURN_LEFT
+                command = HabitatSimActions.TURN_LEFT
             elif d_angle > pi:
-                command = SimulatorActions.TURN_RIGHT
+                command = HabitatSimActions.TURN_RIGHT
             elif (d_angle < 0) and (d_angle > -pi):
-                command = SimulatorActions.TURN_RIGHT
+                command = HabitatSimActions.TURN_RIGHT
             else:
-                command = SimulatorActions.TURN_LEFT
+                command = HabitatSimActions.TURN_LEFT
         return command
 
     def decide_what_to_do(self):
         action = None
         if self.is_goal_reached():
-            action = SimulatorActions.STOP
-            return action
+            action = HabitatSimActions.STOP
+            return {"action": action}
         if self.unseen_obstacle:
-            command = SimulatorActions.TURN_RIGHT
+            command = HabitatSimActions.TURN_RIGHT
             return command
-        command = SimulatorActions.STOP
+        command = HabitatSimActions.STOP
         command = self.planner_prediction_to_command(self.waypointPose6D)
         return command
 
@@ -607,11 +613,11 @@ def main():
     make_good_config_for_orbslam2(config)
 
     if args.agent_type == "blind":
-        agent = BlindAgent(config.BASELINE.ORBSLAM2)
+        agent = BlindAgent(config.TRAINER.ORBSLAM2)
     elif args.agent_type == "orbslam2-rgbd":
-        agent = ORBSLAM2Agent(config.BASELINE.ORBSLAM2)
+        agent = ORBSLAM2Agent(config.TRAINER.ORBSLAM2)
     elif args.agent_type == "orbslam2-rgb-monod":
-        agent = ORBSLAM2MonodepthAgent(config.BASELINE.ORBSLAM2)
+        agent = ORBSLAM2MonodepthAgent(config.TRAINER.ORBSLAM2)
     else:
         raise ValueError(args.agent_type, "is unknown type of agent")
     benchmark = habitat.Benchmark(args.task_config)

@@ -10,7 +10,8 @@ import numpy as np
 
 from habitat.core.simulator import Simulator
 from habitat.datasets.utils import get_action_shortest_path
-from habitat.tasks.nav.nav_task import NavigationEpisode, NavigationGoal
+from habitat.tasks.nav.nav import NavigationEpisode, NavigationGoal
+from habitat_sim.errors import GreedyFollowerError
 
 r"""A minimum radius of a plane that a point should be part of to be
 considered  as a target or source location. Used to filter isolated points
@@ -40,7 +41,7 @@ def is_compatible_episode(
     if np.abs(s[1] - t[1]) > 0.5:  # check height difference to assure s and
         #  t are from same floor
         return False, 0
-    d_separation = sim.geodesic_distance(s, t)
+    d_separation = sim.geodesic_distance(s, [t])
     if d_separation == np.inf:
         return False, 0
     if not near_dist <= d_separation <= far_dist:
@@ -144,16 +145,20 @@ def generate_pointnav_episode(
 
             shortest_paths = None
             if is_gen_shortest_path:
-                shortest_paths = [
-                    get_action_shortest_path(
-                        sim,
-                        source_position=source_position,
-                        source_rotation=source_rotation,
-                        goal_position=target_position,
-                        success_distance=shortest_path_success_distance,
-                        max_episode_steps=shortest_path_max_steps,
-                    )
-                ]
+                try:
+                    shortest_paths = [
+                        get_action_shortest_path(
+                            sim,
+                            source_position=source_position,
+                            source_rotation=source_rotation,
+                            goal_position=target_position,
+                            success_distance=shortest_path_success_distance,
+                            max_episode_steps=shortest_path_max_steps,
+                        )
+                    ]
+                # Throws an error when it can't find a path
+                except GreedyFollowerError:
+                    continue
 
             episode = _create_episode(
                 episode_id=episode_count,

@@ -5,14 +5,18 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import textwrap
 from typing import Dict, List, Optional, Tuple
 
-import cv2
 import imageio
 import numpy as np
 import tqdm
 
+from habitat.core.logging import logger
+from habitat.core.utils import try_cv2_import
 from habitat.utils.visualizations import maps
+
+cv2 = try_cv2_import()
 
 
 def paste_overlapping_image(
@@ -99,7 +103,7 @@ def images_to_video(
     video_name: str,
     fps: int = 10,
     quality: Optional[float] = 5,
-    **kwargs
+    **kwargs,
 ):
     r"""Calls imageio to run FFMPEG on a list of images. For more info on
     parameters, see https://imageio.readthedocs.io/en/stable/format_ffmpeg.html
@@ -123,8 +127,9 @@ def images_to_video(
         os.path.join(output_dir, video_name),
         fps=fps,
         quality=quality,
-        **kwargs
+        **kwargs,
     )
+    logger.info(f"Video created: {os.path.join(output_dir, video_name)}")
     for im in tqdm.tqdm(images):
         writer.append_data(im)
     writer.close()
@@ -139,9 +144,8 @@ def draw_collision(view: np.ndarray, alpha: float = 0.4) -> np.ndarray:
     Returns:
         A view with collision effect drawn.
     """
-    size = view.shape[0]
-    strip_width = size // 20
-    mask = np.ones((size, size))
+    strip_width = view.shape[0] // 20
+    mask = np.ones(view.shape)
     mask[strip_width:-strip_width, strip_width:-strip_width] = 0
     mask = mask == 1
     view[mask] = (alpha * np.array([255, 0, 0]) + (1.0 - alpha) * view)[mask]
@@ -159,24 +163,42 @@ def observations_to_image(observation: Dict, info: Dict) -> np.ndarray:
     Returns:
         generated image of a single frame.
     """
-    observation_size = observation["rgb"].shape[0]
-    egocentric_view = observation["rgb"][:, :, :3]
-    # draw collision
-    if "collisions" in info and info["collisions"]["is_collision"]:
-        egocentric_view = draw_collision(egocentric_view)
+    egocentric_view = []
+    if "rgb" in observation:
+        observation_size = observation["rgb"].shape[0]
+        rgb = observation["rgb"]
+        if not isinstance(rgb, np.ndarray):
+            rgb = rgb.cpu().numpy()
+
+        egocentric_view.append(rgb)
 
     # draw depth map if observation has depth info
     if "depth" in observation:
-        depth_map = (observation["depth"].squeeze() * 255).astype(np.uint8)
-        depth_map = np.stack([depth_map for _ in range(3)], axis=2)
+        observation_size = observation["depth"].shape[0]
+        depth_map = observation["depth"].squeeze() * 255.0
+        if not isinstance(depth_map, np.ndarray):
+            depth_map = depth_map.cpu().numpy()
 
-        egocentric_view = np.concatenate((egocentric_view, depth_map), axis=1)
+        depth_map = depth_map.astype(np.uint8)
+        depth_map = np.stack([depth_map for _ in range(3)], axis=2)
+        egocentric_view.append(depth_map)
+
+    assert (
+        len(egocentric_view) > 0
+    ), "Expected at least one visual sensor enabled."
+    egocentric_view = np.concatenate(egocentric_view, axis=1)
+
+    # draw collision
+    if "collisions" in info and info["collisions"]["is_collision"]:
+        egocentric_view = draw_collision(egocentric_view)
 
     frame = egocentric_view
 
     if "top_down_map" in info:
         top_down_map = info["top_down_map"]["map"]
-        top_down_map = maps.colorize_topdown_map(top_down_map)
+        top_down_map = maps.colorize_topdown_map(
+            top_down_map, info["top_down_map"]["fog_of_war_mask"]
+        )
         map_agent_pos = info["top_down_map"]["agent_map_coord"]
         top_down_map = maps.draw_agent(
             image=top_down_map,
@@ -200,3 +222,42 @@ def observations_to_image(observation: Dict, info: Dict) -> np.ndarray:
         )
         frame = np.concatenate((egocentric_view, top_down_map), axis=1)
     return frame
+
+
+def append_text_to_image(image: np.ndarray, text: str):
+    r""" Appends text underneath an image of size (height, width, channels).
+    The returned image has white text on a black background. Uses textwrap to
+    split long text into multiple lines.
+    Args:
+        image: the image to put text underneath
+        text: a string to display
+    Returns:
+        A new image with text inserted underneath the input image
+    """
+    h, w, c = image.shape
+    font_size = 0.5
+    font_thickness = 1
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    blank_image = np.zeros(image.shape, dtype=np.uint8)
+
+    char_size = cv2.getTextSize(" ", font, font_size, font_thickness)[0]
+    wrapped_text = textwrap.wrap(text, width=int(w / char_size[0]))
+
+    y = 0
+    for line in wrapped_text:
+        textsize = cv2.getTextSize(line, font, font_size, font_thickness)[0]
+        y += textsize[1] + 10
+        x = 10
+        cv2.putText(
+            blank_image,
+            line,
+            (x, y),
+            font,
+            font_size,
+            (255, 255, 255),
+            font_thickness,
+            lineType=cv2.LINE_AA,
+        )
+    text_image = blank_image[0 : y + 10, 0:w]
+    final = np.concatenate((image, text_image), axis=0)
+    return final

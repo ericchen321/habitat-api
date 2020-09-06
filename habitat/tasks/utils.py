@@ -36,22 +36,13 @@ def quaternion_to_rotation(q_r, q_i, q_j, q_k):
     return rotation_mat
 
 
-def quaternion_rotate_vector(quat: np.quaternion, v: np.array) -> np.array:
-    r"""Rotates a vector by a quaternion
-
-    Args:
-        quaternion: The quaternion to rotate by
-        v: The vector to rotate
-
-    Returns:
-        np.array: The rotated vector
-    """
-    vq = np.quaternion(0, 0, 0, 0)
-    vq.imag = v
-    return (quat * vq * quat.inverse()).imag
-
-
 def cartesian_to_polar(x, y):
     rho = np.sqrt(x ** 2 + y ** 2)
     phi = np.arctan2(y, x)
     return rho, phi
+
+
+def compute_pixel_coverage(instance_seg, object_id):
+    cand_mask = instance_seg == object_id
+    score = cand_mask.sum().astype(np.float64) / cand_mask.size
+    return score

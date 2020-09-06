@@ -37,21 +37,22 @@ from rospy_tutorials.msg import Floats
 from geometry_msgs.msg import Twist
 import numpy as np
 
-
 initial_sys_path = sys.path
 sys.path = [b for b in sys.path if "2.7" not in b]
 sys.path.insert(0, os.getcwd())
 
 
 import argparse
-import torch
-import habitat
-from habitat.config.default import get_config
-from config.default import get_config as cfg_baseline
+import random
 
-from train_ppo import make_env_fn
-from rl.ppo import PPO, Policy
-from rl.ppo.utils import batch_obs
+import numpy as np
+import torch
+
+from habitat_baselines.common.baseline_registry import baseline_registry
+from habitat_baselines.config.default import get_config
+from habitat_baselines.rl.ppo.ppo_trainer import PPOTrainer
+from habitat_baselines.common.utils import batch_obs
+
 import time
 
 
@@ -66,117 +67,57 @@ flag = 2
 observation = {}
 t_prev_update = time.time()
 
-
-def pol2cart(rho, phi):
-    x = rho * np.cos(phi)
-    y = rho * np.sin(phi)
-    return (x, y)
-
-
 def main():
-
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", type=str, required=True)
-    parser.add_argument("--sim-gpu-id", type=int, required=True)
-    parser.add_argument("--pth-gpu-id", type=int, required=True)
-    parser.add_argument("--num-processes", type=int, required=True)
-    parser.add_argument("--hidden-size", type=int, default=512)
-    parser.add_argument("--count-test-episodes", type=int, default=100)
     parser.add_argument(
-        "--sensors",
-        type=str,
-        default="DEPTH_SENSOR",
-        help="comma separated string containing different"
-        "sensors to use, currently 'RGB_SENSOR' and"
-        "'DEPTH_SENSOR' are supported",
+        "--run-type",
+        choices=["train", "eval"],
+        required=True,
+        help="run type of the experiment (train or eval)",
     )
     parser.add_argument(
-        "--task-config",
+        "--exp-config",
         type=str,
-        default="configs/tasks/pointnav.yaml",
-        help="path to config yaml containing information about task",
+        required=True,
+        help="path to config yaml containing info about experiment",
+    )
+    parser.add_argument(
+        "opts",
+        default=None,
+        nargs=argparse.REMAINDER,
+        help="Modify config options from command line",
     )
 
-    cmd_line_inputs = [
-        "--model-path",
-        "/home/bruce/NSERC_2019/habitat-api/data/checkpoints/depth.pth",
-        "--sim-gpu-id",
-        "0",
-        "--pth-gpu-id",
-        "0",
-        "--num-processes",
-        "1",
-        "--count-test-episodes",
-        "100",
-        "--task-config",
-        "configs/tasks/pointnav.yaml",
-    ]
-    args = parser.parse_args(cmd_line_inputs)
+    args = parser.parse_args()
+    run_exp(**vars(args))
 
-    device = torch.device("cuda:{}".format(args.pth_gpu_id))
 
-    env_configs = []
-    baseline_configs = []
+def run_exp(exp_config: str, run_type: str, opts=None) -> None:
+    r"""Runs experiment given mode and config
 
-    for _ in range(args.num_processes):
-        config_env = get_config(config_paths=args.task_config)
-        config_env.defrost()
-        config_env.DATASET.SPLIT = "val"
+    Args:
+        exp_config: path to config file.
+        run_type: "train" or "eval.
+        opts: list of strings of additional config options.
 
-        agent_sensors = args.sensors.strip().split(",")
-        for sensor in agent_sensors:
-            assert sensor in ["RGB_SENSOR", "DEPTH_SENSOR"]
-        config_env.SIMULATOR.AGENT_0.SENSORS = agent_sensors
-        config_env.freeze()
-        env_configs.append(config_env)
+    Returns:
+        None.
+    """
+    config = get_config(exp_config, opts)
 
-        config_baseline = cfg_baseline()
-        baseline_configs.append(config_baseline)
+    random.seed(config.TASK_CONFIG.SEED)
+    np.random.seed(config.TASK_CONFIG.SEED)
+    torch.manual_seed(config.TASK_CONFIG.SEED)
 
-    assert len(baseline_configs) > 0, "empty list of datasets"
+    trainer_init = baseline_registry.get_trainer(config.TRAINER_NAME)
+    assert trainer_init is not None, f"{config.TRAINER_NAME} is not supported"
+    trainer = trainer_init(config)
 
-    envs = habitat.VectorEnv(
-        make_env_fn=make_env_fn,
-        env_fn_args=tuple(
-            tuple(zip(env_configs, baseline_configs, range(args.num_processes)))
-        ),
-    )
-
-    ckpt = torch.load(args.model_path, map_location=device)
-
-    actor_critic = Policy(
-        observation_space=envs.observation_spaces[0],
-        action_space=envs.action_spaces[0],
-        hidden_size=512,
-        goal_sensor_uuid="pointgoal",
-    )
-    actor_critic.to(device)
-
-    ppo = PPO(
-        actor_critic=actor_critic,
-        clip_param=0.1,
-        ppo_epoch=4,
-        num_mini_batch=32,
-        value_loss_coef=0.5,
-        entropy_coef=0.01,
-        lr=2.5e-4,
-        eps=1e-5,
-        max_grad_norm=0.5,
-    )
-
-    ppo.load_state_dict(ckpt["state_dict"])
-
-    actor_critic = ppo.actor_critic
-
-    observations = envs.reset()
-    batch = batch_obs(observations)
-    for sensor in batch:
-        batch[sensor] = batch[sensor].to(device)
-
-    test_recurrent_hidden_states = torch.zeros(
-        args.num_processes, args.hidden_size, device=device
-    )
-    not_done_masks = torch.zeros(args.num_processes, 1, device=device)
+    if run_type == "train":
+        trainer.train()
+    elif run_type == "eval":
+        # following are modified based on ppo_trainer.py
+        actor_critic, batch, device, not_done_masks, test_recurrent_hidden_states = trainer.eval_bruce()
 
     def transform_callback(data):
         nonlocal actor_critic
@@ -189,7 +130,7 @@ def main():
 
         if flag == 2:
             observation["depth"] = np.reshape(data.data[0:-2], (256, 256, 1))
-            observation["pointgoal"] = data.data[-2:]
+            observation["pointgoal_with_gps_compass"] = data.data[-2:]
             flag = 1
             return
 
@@ -199,7 +140,7 @@ def main():
 
         isrotated = (
             rotate_amount * 0.95
-            <= abs(pointgoal_received[1] - observation["pointgoal"][1])
+            <= abs(pointgoal_received[1] - observation["pointgoal_with_gps_compass"][1])
             <= rotate_amount * 1.05
         )
         istimeup = (time.time() - t_prev_update) >= 4
@@ -224,7 +165,7 @@ def main():
             # cv2.waitKey(100)
 
             observation["depth"] = np.reshape(data.data[0:-2], (256, 256, 1))
-            observation["pointgoal"] = data.data[-2:]
+            observation["pointgoal_with_gps_compass"] = data.data[-2:]
 
             batch = batch_obs([observation])
             for sensor in batch:
@@ -242,7 +183,7 @@ def main():
             action_id = actions.item()
             print(
                 "observation received to produce action_id is "
-                + str(observation["pointgoal"])
+                + str(observation["pointgoal_with_gps_compass"])
             )
             print("action_id from net is " + str(actions.item()))
 

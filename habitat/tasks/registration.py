@@ -6,15 +6,21 @@
 
 from habitat.core.logging import logger
 from habitat.core.registry import registry
-from habitat.tasks.eqa.eqa_task import EQATask
-from habitat.tasks.nav.nav_task import NavigationTask
+from habitat.tasks.eqa import _try_register_eqa_task
+from habitat.tasks.nav import _try_register_nav_task
+from habitat.tasks.vln import _try_register_vln_task
 
 
 def make_task(id_task, **kwargs):
-    logger.info("initializing task {}".format(id_task))
+    logger.info("Initializing task {}".format(id_task))
     _task = registry.get_task(id_task)
     assert _task is not None, "Could not find task with name {}".format(
         id_task
     )
 
     return _task(**kwargs)
+
+
+_try_register_eqa_task()
+_try_register_nav_task()
+_try_register_vln_task()

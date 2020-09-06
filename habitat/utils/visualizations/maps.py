@@ -7,13 +7,16 @@
 import os
 from typing import List, Optional, Tuple
 
-import cv2
 import imageio
 import numpy as np
 import scipy.ndimage
 
 from habitat.core.simulator import Simulator
+from habitat.core.utils import try_cv2_import
 from habitat.utils.visualizations import utils
+
+cv2 = try_cv2_import()
+
 
 AGENT_SPRITE = imageio.imread(
     os.path.join(
@@ -34,16 +37,20 @@ MAP_BORDER_INDICATOR = 2
 MAP_SOURCE_POINT_INDICATOR = 4
 MAP_TARGET_POINT_INDICATOR = 6
 MAP_SHORTEST_PATH_COLOR = 7
+MAP_VIEW_POINT_INDICATOR = 8
+MAP_TARGET_BOUNDING_BOX = 9
 TOP_DOWN_MAP_COLORS = np.full((256, 3), 150, dtype=np.uint8)
 TOP_DOWN_MAP_COLORS[10:] = cv2.applyColorMap(
     np.arange(246, dtype=np.uint8), cv2.COLORMAP_JET
 ).squeeze(1)[:, ::-1]
-TOP_DOWN_MAP_COLORS[MAP_INVALID_POINT] = [255, 255, 255]
-TOP_DOWN_MAP_COLORS[MAP_VALID_POINT] = [150, 150, 150]
-TOP_DOWN_MAP_COLORS[MAP_BORDER_INDICATOR] = [50, 50, 50]
-TOP_DOWN_MAP_COLORS[MAP_SOURCE_POINT_INDICATOR] = [0, 0, 200]
-TOP_DOWN_MAP_COLORS[MAP_TARGET_POINT_INDICATOR] = [200, 0, 0]
-TOP_DOWN_MAP_COLORS[MAP_SHORTEST_PATH_COLOR] = [0, 200, 0]
+TOP_DOWN_MAP_COLORS[MAP_INVALID_POINT] = [255, 255, 255]  # White
+TOP_DOWN_MAP_COLORS[MAP_VALID_POINT] = [150, 150, 150]  # Light Grey
+TOP_DOWN_MAP_COLORS[MAP_BORDER_INDICATOR] = [50, 50, 50]  # Grey
+TOP_DOWN_MAP_COLORS[MAP_SOURCE_POINT_INDICATOR] = [0, 0, 200]  # Blue
+TOP_DOWN_MAP_COLORS[MAP_TARGET_POINT_INDICATOR] = [200, 0, 0]  # Red
+TOP_DOWN_MAP_COLORS[MAP_SHORTEST_PATH_COLOR] = [0, 200, 0]  # Green
+TOP_DOWN_MAP_COLORS[MAP_VIEW_POINT_INDICATOR] = [245, 150, 150]  # Light Red
+TOP_DOWN_MAP_COLORS[MAP_TARGET_BOUNDING_BOX] = [0, 175, 0]  # Green
 
 
 def draw_agent(
@@ -327,29 +334,32 @@ def get_topdown_map(
     return top_down_map
 
 
-FOG_OF_WAR_COLOR_DESAT = np.array([[0.7], [1.0]])
-
-
 def colorize_topdown_map(
-    top_down_map: np.ndarray, fog_of_war_mask: Optional[np.ndarray] = None
+    top_down_map: np.ndarray,
+    fog_of_war_mask: Optional[np.ndarray] = None,
+    fog_of_war_desat_amount: float = 0.5,
 ) -> np.ndarray:
     r"""Convert the top down map to RGB based on the indicator values.
         Args:
             top_down_map: A non-colored version of the map.
-            fog_of_war_mask: A mask used to determine which parts of the 
+            fog_of_war_mask: A mask used to determine which parts of the
                 top_down_map are visible
                 Non-visible parts will be desaturated
+            fog_of_war_desat_amount: Amount to desaturate the color of unexplored areas
+                Decreasing this value will make unexplored areas darker
+                Default: 0.5
         Returns:
             A colored version of the top-down map.
     """
     _map = TOP_DOWN_MAP_COLORS[top_down_map]
 
     if fog_of_war_mask is not None:
+        fog_of_war_desat_values = np.array([[fog_of_war_desat_amount], [1.0]])
         # Only desaturate things that are valid points as only valid points get revealed
         desat_mask = top_down_map != MAP_INVALID_POINT
 
         _map[desat_mask] = (
-            _map * FOG_OF_WAR_COLOR_DESAT[fog_of_war_mask]
+            _map * fog_of_war_desat_values[fog_of_war_mask]
         ).astype(np.uint8)[desat_mask]
 
     return _map
@@ -369,4 +379,11 @@ def draw_path(
             thickness: thickness of the path.
     """
     for prev_pt, next_pt in zip(path_points[:-1], path_points[1:]):
-        cv2.line(top_down_map, prev_pt, next_pt, color, thickness=thickness)
+        # Swapping x y
+        cv2.line(
+            top_down_map,
+            prev_pt[::-1],
+            next_pt[::-1],
+            color,
+            thickness=thickness,
+        )
