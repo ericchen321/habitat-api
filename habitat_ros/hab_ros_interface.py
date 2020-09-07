@@ -48,6 +48,13 @@ class sim_env(threading.Thread):
         self.env._sim._sim.agents[0].move_filter_fn = self.env._sim._sim._step_filter
         self.observations = self.env.reset()
 
+        # add a sphere
+        # load some object templates from configuration files
+        sphere_template_id = self.env._sim._sim.load_object_configs(
+            str("/home/eric/habitat-sim-may-2020/habitat-sim/data/test_assets/objects/sphere"))[0]
+        id_sphere = self.env._sim._sim.add_object(sphere_template_id)
+        self.env._sim._sim.set_translation(np.array([-2.63,0.114367,19.3]), id_sphere)
+
         # load and initialize the lobot_merged asset
         locobot_template_id = self.env._sim._sim.load_object_configs("/home/eric/habitat-sim-may-2020/habitat-sim/data/objects/locobot_merged")[0]
         #("locobot_template_id is " + str(locobot_template_id))
@@ -162,12 +169,14 @@ def main():
     rospy.Subscriber("/cmd_vel", Twist, callback, (my_env), queue_size=1)
 
     # run the simulation
+    rate = rospy.Rate(10)
     while not rospy.is_shutdown():
         lock.acquire()
         my_env.env._sim._sim.step_physics(1.0 / 60.0)
         my_env.env._update_step_stats()  # think this increments episode count
         my_env.update_observations()
         lock.release()
+        rate.sleep()
 
 if __name__ == "__main__":
     main()
