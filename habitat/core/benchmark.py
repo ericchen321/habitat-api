@@ -17,13 +17,15 @@ from habitat.config.default import get_config
 from habitat.core.agent import Agent
 from habitat.core.env import Env
 
+# use TensorBoard to visualize
+from habitat_agent_evals.tensorboard_utils_new import TensorboardWriter, generate_video
 
 class Benchmark:
     r"""Benchmark for evaluating agents in environments.
     """
 
     def __init__(
-        self, config_paths: Optional[str] = None, eval_remote=False
+        self, config_paths: Optional[str] = None, eval_remote=False, enable_physics=False
     ) -> None:
         r"""..
 
@@ -33,10 +35,13 @@ class Benchmark:
         config_env = get_config(config_paths)
         self._eval_remote = eval_remote
 
+        self._enable_physics = enable_physics
+
         if self._eval_remote is True:
             self._env = None
         else:
             self._env = Env(config=config_env)
+
 
     def remote_evaluate(
         self, agent: Agent, num_episodes: Optional[int] = None
@@ -113,7 +118,7 @@ class Benchmark:
 
         return avg_metrics
 
-    def local_evaluate(self, agent: Agent, num_episodes: Optional[int] = None):
+    def local_evaluate(self, agent: Agent, num_episodes: Optional[int] = None, control_period: Optional[float] = 1.0):
         if num_episodes is None:
             num_episodes = len(self._env.episodes)
         else:
@@ -128,26 +133,59 @@ class Benchmark:
 
         agg_metrics: Dict = defaultdict(float)
 
+        writer = TensorboardWriter('tb_benchmark/', flush_secs=30) # flush_specs from base_trainer.py
+
         count_episodes = 0
+        print("number of episodes: " + str(num_episodes))
         while count_episodes < num_episodes:
+            print("working on episode " + str(count_episodes))
+            observations_per_episode = []
             agent.reset()
-            observations = self._env.reset()
-
+            observations_per_action = self._env.reset()
+            # initialize physic-enabled sim env. Do this for every
+            # episode, since sometimes assets get deallocated
+            if self._enable_physics:
+                self._env.disable_physics()
+                self._env.enable_physics()
+            
             while not self._env.episode_over:
-                action = agent.act(observations)
-                observations = self._env.step(action)
-
+                action = agent.act(observations_per_action)
+                observations_per_action = None
+                if (self._enable_physics is False):
+                    observations_per_action = self._env.step(action)
+                else:
+                    # step with physics. For now we use hard-coded time step of 1/60 secs
+                    # (used in the rigid object tutorial in Habitat Sim)
+                    observations_per_action = self._env.step_physics(action, time_step=1.0/60.0, control_period=control_period)
+                observations_per_episode.append(observations_per_action["depth"])
+            
+            # episode ended
+            # calculate metrics so far
             metrics = self._env.get_metrics()
             for m, v in metrics.items():
                 agg_metrics[m] += v
             count_episodes += 1
+            for k, v in agg_metrics.items():
+                print(f'{k},{v}')
+            # running average
+            avg_metrics_running = {k: v / count_episodes for k, v in agg_metrics.items()}
+            # generate video
+            generate_video(
+                video_option=["disk", "tensorboard"],
+                video_dir='video_benchmark_dir',
+                images=observations_per_episode,
+                episode_id=count_episodes-1,
+                checkpoint_idx=0,
+                metrics=avg_metrics_running,
+                tb_writer=writer,
+            )
 
         avg_metrics = {k: v / count_episodes for k, v in agg_metrics.items()}
 
         return avg_metrics
 
     def evaluate(
-        self, agent: Agent, num_episodes: Optional[int] = None
+        self, agent: Agent, num_episodes: Optional[int] = None, control_period: Optional[float] = 1.0
     ) -> Dict[str, float]:
         r"""..
 

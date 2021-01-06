@@ -289,6 +289,15 @@ class HabitatSim(Simulator):
         self._prev_sim_obs = sim_obs
         observations = self._sensor_suite.get_observations(sim_obs)
         return observations
+    
+    def step_physics(self, time_step):
+        sim_obs = self._sim.step_physics(time_step)
+        self._prev_sim_obs = sim_obs
+        observations = self._sensor_suite.get_observations(sim_obs)
+        return observations
+    
+    def get_object_velocity_control(self, id_agent_obj):
+        return self._sim.get_object_velocity_control(id_agent_obj)
 
     def render(self, mode: str = "rgb") -> Any:
         r"""

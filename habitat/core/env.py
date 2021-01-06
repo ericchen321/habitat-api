@@ -20,6 +20,7 @@ from habitat.core.simulator import Observations, Simulator
 from habitat.datasets import make_dataset
 from habitat.sims import make_sim
 from habitat.tasks import make_task
+import habitat_sim as hsim
 
 
 class Env:
@@ -270,6 +271,68 @@ class Env:
         self._update_step_stats()
 
         return observations
+    
+    def step_physics(
+        self, action: Union[int, str, Dict[str, Any]], time_step=1.0/60.0, control_period=1.0, **kwargs
+    ) -> Observations: 
+        r"""Perform an action in the environment, with physics enabled, and 
+        return observations.
+
+        :param action: action (belonging to :ref:`action_space`) to be
+            performed inside the environment. Action is a name or index of
+            allowed task's action and action arguments (belonging to action's
+            :ref:`action_space`) to support parametrized and continuous
+            actions.
+        :param time_step: time step for physics simulation
+        :return: observations after taking action in environment.
+        """
+        assert (
+            self._episode_start_time is not None
+        ), "Cannot call step before calling reset"
+        assert (
+            self._episode_over is False
+        ), "Episode over, call reset before calling step"
+
+        # Support simpler interface as well
+        if isinstance(action, str) or isinstance(action, (int, np.integer)):
+            action = {"action": action}
+                
+        # Step with physics
+        observations = self.task.step_physics(
+            action=action, episode=self.current_episode, time_step=time_step, control_period=control_period, id_agent_obj=self._id_agent_obj
+        )
+
+        self._task.measurements.update_measures(
+            episode=self.current_episode, action=action, task=self.task
+        )
+
+        self._update_step_stats()
+
+        return observations
+    
+    def enable_physics(self):
+        r"""Enables physics in the environment and initialize the
+        simulation environment.
+        """
+        # attach asset to agent
+        locobot_template_id = self._sim._sim.load_object_configs("/home/eric/habitat-sim-may-2020/habitat-sim/data/objects/locobot_merged")[0]
+        #print("locobot_template_id is " + str(locobot_template_id))
+        self._id_agent_obj = self._sim._sim.add_object(locobot_template_id, self._sim._sim.agents[0].scene_node)
+        #print("id of agent object is " + str(self._id_agent_obj))
+        
+        # set all objects in scene to be dynamic
+        obj_ids = self._sim._sim.get_existing_object_ids()
+        for obj_id in obj_ids:
+            self._sim._sim.set_object_motion_type(hsim.physics.MotionType.DYNAMIC, obj_id)
+
+    def disable_physics(self):
+        r"""Disables physics in the environment and clear up the
+        simulation environment.
+        """        
+        # remove all objects in the scene, but keep their scene nodes
+        obj_ids = self._sim._sim.get_existing_object_ids()
+        for obj_id in obj_ids:
+            self._sim._sim.remove_object(object_id=obj_id, delete_object_node=False, delete_visual_node=False)
 
     @staticmethod
     @numba.njit

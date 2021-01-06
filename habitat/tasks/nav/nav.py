@@ -1014,7 +1014,24 @@ class MoveForwardAction(SimulatorTaskAction):
         ``step``.
         """
         return self._sim.step(HabitatSimActions.MOVE_FORWARD)
-
+    
+    def step_physics(self, time_step, control_period, id_agent_obj, *args: Any, **kwargs: Any):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.lin_vel_is_local = True
+        agent_vel_control.ang_vel_is_local = True
+        # set linear velocity. 0.25m is defined as _C.SIMULATOR.FORWARD_STEP_SIZE
+        # in habitat/config/default.py. By default, forward movement happens on the
+        # local z axis.
+        # TODO: programmatically load this value
+        agent_vel_control.linear_velocity = np.float32([0, 0, -0.25/control_period])
+        agent_vel_control.angular_velocity = np.float32([0, 0, 0])
+        return self._sim.step_physics(time_step)
 
 @registry.register_task_action
 class TurnLeftAction(SimulatorTaskAction):
@@ -1023,6 +1040,25 @@ class TurnLeftAction(SimulatorTaskAction):
         ``step``.
         """
         return self._sim.step(HabitatSimActions.TURN_LEFT)
+    
+    def step_physics(self, time_step, control_period, id_agent_obj, *args: Any, **kwargs: Any):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.lin_vel_is_local = True
+        agent_vel_control.ang_vel_is_local = True
+        # set angular velocity. 10 deg is defined as _C.SIMULATOR.TURN_ANGLE
+        # in habitat/config/default.py. By default, turning left/right is about
+        # the local y axis.
+        # TODO: programmatically load this value
+        angular_vel_in_rad = np.radians(10.0/control_period)
+        agent_vel_control.linear_velocity = np.float32([0, 0, 0])
+        agent_vel_control.angular_velocity = np.float32([0, angular_vel_in_rad, 0])
+        return self._sim.step_physics(time_step)
 
 
 @registry.register_task_action
@@ -1032,6 +1068,21 @@ class TurnRightAction(SimulatorTaskAction):
         ``step``.
         """
         return self._sim.step(HabitatSimActions.TURN_RIGHT)
+    
+    def step_physics(self, time_step, control_period, id_agent_obj, *args: Any, **kwargs: Any):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.lin_vel_is_local = True
+        agent_vel_control.ang_vel_is_local = True
+        angular_vel_in_rad = np.radians(-10.0/control_period)
+        agent_vel_control.linear_velocity = np.float32([0, 0, 0])
+        agent_vel_control.angular_velocity = np.float32([0, angular_vel_in_rad, 0])
+        return self._sim.step_physics(time_step)
 
 
 @registry.register_task_action
@@ -1047,6 +1098,21 @@ class StopAction(SimulatorTaskAction):
         """
         task.is_stop_called = True
         return self._sim.get_observations_at()
+    
+    def step_physics(self, task: EmbodiedTask, id_agent_obj, *args: Any, **kwargs: Any):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.lin_vel_is_local = True
+        agent_vel_control.ang_vel_is_local = True
+        agent_vel_control.linear_velocity = np.float32([0, 0, 0])
+        agent_vel_control.angular_velocity = np.float32([0, 0, 0])
+        task.is_stop_called = True
+        return self._sim.get_observations_at()
 
 
 @registry.register_task_action
@@ -1056,6 +1122,20 @@ class LookUpAction(SimulatorTaskAction):
         ``step``.
         """
         return self._sim.step(HabitatSimActions.LOOK_UP)
+    
+    def step_physics(self, id_agent_obj, *args: Any, **kwargs: Any):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.lin_vel_is_local = True
+        agent_vel_control.ang_vel_is_local = True
+        agent_vel_control.linear_velocity = np.float32([0, 0, 0])
+        agent_vel_control.angular_velocity = np.float32([0, 0, 0])
+        return self._sim.step(HabitatSimActions.LOOK_UP)
 
 
 @registry.register_task_action
@@ -1064,6 +1144,20 @@ class LookDownAction(SimulatorTaskAction):
         r"""Update ``_metric``, this method is called from ``Env`` on each
         ``step``.
         """
+        return self._sim.step(HabitatSimActions.LOOK_DOWN)
+
+    def step_physics(self, id_agent_obj, *args: Any, **kwargs: Any):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.lin_vel_is_local = True
+        agent_vel_control.ang_vel_is_local = True
+        agent_vel_control.linear_velocity = np.float32([0, 0, 0])
+        agent_vel_control.angular_velocity = np.float32([0, 0, 0])
         return self._sim.step(HabitatSimActions.LOOK_DOWN)
 
 
@@ -1087,6 +1181,34 @@ class TeleportAction(SimulatorTaskAction):
         r"""Update ``_metric``, this method is called from ``Env`` on each
         ``step``.
         """
+
+        if not isinstance(rotation, list):
+            rotation = list(rotation)
+
+        if not self._sim.is_navigable(position):
+            return self._sim.get_observations_at()
+
+        return self._sim.get_observations_at(
+            position=position, rotation=rotation, keep_agent_at_new_pose=True
+        )
+
+    def step_physics(
+        self,
+        *args: Any,
+        position: List[float],
+        rotation: List[float],
+        id_agent_obj,
+        **kwargs: Any,
+    ):
+        r"""Update ``_metric``, this method is called from ``Env`` on each
+        ``step``. Step with physics enabled.
+        """
+        # convert forward command to linear velocity
+        agent_vel_control = self._sim.get_object_velocity_control(id_agent_obj)
+        agent_vel_control.controlling_lin_vel = True
+        agent_vel_control.controlling_ang_vel = True
+        agent_vel_control.linear_velocity = np.float32([0, 0, 0])
+        agent_vel_control.angular_velocity = np.float32([0, 0, 0])
 
         if not isinstance(rotation, list):
             rotation = list(rotation)

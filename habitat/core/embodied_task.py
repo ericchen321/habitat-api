@@ -17,6 +17,7 @@ from habitat.core.dataset import Dataset, Episode
 from habitat.core.registry import registry
 from habitat.core.simulator import Observations, SensorSuite, Simulator
 from habitat.core.spaces import ActionSpace, EmptySpace, Space
+from habitat.utils.geometry_utils import quaternion_rotate_vector
 
 
 class Action:
@@ -41,6 +42,17 @@ class Action:
     def step(self, *args: Any, **kwargs: Any) -> Observations:
         r"""Step method is called from ``Env`` on each ``step``. Can call
         simulator or task method, change task's state.
+
+        :param kwargs: optional parameters for the action, like distance/force.
+        :return: observations after taking action in the task, including ones
+            coming from a simulator.
+        """
+        raise NotImplementedError
+    
+    def step_physics(self, *args: Any, **kwargs: Any) -> Observations:
+        r"""Step method with physics is called from ``Env`` on each ``step``,
+        with physics simulation enabled. Can call simulator or task method, 
+        change task's state.
 
         :param kwargs: optional parameters for the action, like distance/force.
         :return: observations after taking action in the task, including ones
@@ -77,6 +89,25 @@ class SimulatorTaskAction(Action):
         r"""Step method is called from ``Env`` on each ``step``.
         """
         raise NotImplementedError
+
+    def step_physics(self, *args: Any, **kwargs: Any) -> Observations:
+        r"""Step method with physics is called from ``Env`` on 
+        each ``step``.
+        """
+        raise NotImplementedError
+
+    def get_vel_world_frame(self, vel_local, rotation, translation) -> np.ndarray:
+        r"""Get velocity in world frame. 
+        Args:
+        vel_local: linear/angular velocity in local frame, a numpy array
+        rotation: rotation w.r.t. the world frame, a quaternion vector
+        translation: translation w.r.t the world frame, a numpy array
+        """
+        
+        # rotate and translate
+        vel_world = quaternion_rotate_vector(rotation, vel_local) + np.array(translation)
+
+        return vel_world
 
 
 class Measure:
@@ -303,6 +334,42 @@ class EmbodiedTask:
 
         task_action = self.actions[action_name]
         observations = task_action.step(**action["action_args"], task=self)
+        observations.update(
+            self.sensor_suite.get_observations(
+                observations=observations,
+                episode=episode,
+                action=action,
+                task=self,
+            )
+        )
+
+        self._is_episode_active = self._check_episode_is_active(
+            observations=observations, action=action, episode=episode
+        )
+
+        return observations
+    
+    def step_physics(self, action: Union[int, Dict[str, Any]], episode: Type[Episode], time_step, control_period, id_agent_obj):
+        if "action_args" not in action or action["action_args"] is None:
+            action["action_args"] = {}
+        action_name = action["action"]
+        if isinstance(action_name, (int, np.integer)):
+            action_name = self.get_action_name(action_name)
+        assert (
+            action_name in self.actions
+        ), f"Can't find '{action_name}' action in {self.actions.keys()}."
+
+        task_action = self.actions[action_name]
+
+        # step through all frames in the control period
+        total_steps = int(control_period * 1.0/time_step)
+        observations = None
+        for i in range(0, total_steps):
+            observations_per_step = task_action.step_physics(**action["action_args"], task=self, time_step=time_step, control_period=control_period, id_agent_obj=id_agent_obj)
+            # we only collect observations from the last frame
+            if i == total_steps-1:
+                observations = observations_per_step
+
         observations.update(
             self.sensor_suite.get_observations(
                 observations=observations,
