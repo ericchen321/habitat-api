@@ -451,7 +451,7 @@ class PPOTrainer(BaseRLTrainer):
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
-        if self.config.EVAL.USE_CKPT_CONFIG:
+        if self.config.EVAL.USE_CKPT_CONFIG and "config" in ckpt_dict:
             config = self._setup_eval_config(ckpt_dict["config"])
         else:
             config = self.config.clone()
@@ -668,9 +668,9 @@ class PPOTrainer(BaseRLTrainer):
         """
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
+        print(ckpt_dict)
 
         if self.config.EVAL.USE_CKPT_CONFIG:
-            
             config = self._setup_eval_config(ckpt_dict["config"])
         else:
             config = self.config.clone()
