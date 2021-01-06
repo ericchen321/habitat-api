@@ -1,3 +1,6 @@
+# script to remap model weights created by Erik Wijmans.
+# from https://gist.github.com/erikwijmans/94f33461982ac9e3cc354fb26e4b80e1
+
 import argparse
 import collections
 
