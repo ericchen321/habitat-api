@@ -17,7 +17,7 @@ sys.path = [
 ]  # remove path's related to ROS from environment or else certain packages like cv2 can't be imported
 
 import habitat
-import habitat_sim.bindings as hsim
+import habitat_sim as hsim
 import magnum as mn
 import numpy as np
 import time
@@ -57,9 +57,13 @@ class sim_env(threading.Thread):
 
         # load and initialize the lobot_merged asset
         locobot_template_id = self.env._sim._sim.load_object_configs("/home/eric/habitat-sim-may-2020/habitat-sim/data/objects/locobot_merged")[0]
-        #("locobot_template_id is " + str(locobot_template_id))
+        # print("locobot_template_id is " + str(locobot_template_id))
         # add robot object to the scene with the agent/camera SceneNode attached
         self.id_agent_obj = self.env._sim._sim.add_object(locobot_template_id, self.env._sim._sim.agents[0].scene_node)
+        # print("id of agent object is " + str(self.id_agent_obj))
+        # set the agent's body to dynamic
+        self.env._sim._sim.set_object_motion_type(hsim.physics.MotionType.DYNAMIC, self.id_agent_obj)
+
         self.env._sim._sim.agents[0].state.velocity = np.float32([0, 0, 0])
         self.env._sim._sim.agents[0].state.angular_velocity = np.float32([0, 0, 0])
         self.vel_control = self.env._sim._sim.get_object_velocity_control(self.id_agent_obj)
@@ -146,7 +150,7 @@ def callback(vel, my_env):
     lock.acquire()
     
     pos = my_env.env.sim.get_agent_state(0).position
-    print(f"agent's position: {pos}.")
+    # print(f"agent's position: {pos}.")
     my_env.vel_control.linear_velocity = np.array([(-1.0 * vel.linear.y), 0.0, vel.linear.x])
     my_env.vel_control.angular_velocity = np.array([0.0, vel.angular.z, 0])
     my_env.vel_control.controlling_lin_vel = True
