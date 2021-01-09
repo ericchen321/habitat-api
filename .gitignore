@@ -105,3 +105,15 @@ frames\.pdf
 data/scene_datasets/
 
 data/datasets/
+
+data/objects/
+
+data/new_checkpoints
+
+tb/
+
+tb_benchmark/
+
+video_benchmark_dir/
+
+video_dir/
