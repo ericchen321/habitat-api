@@ -23,7 +23,8 @@ from habitat_baselines.common.tensorboard_utils import TensorboardWriter
 
 class Flatten(nn.Module):
     def forward(self, x):
-        return x.view(x.size(0), -1)
+        #print("SHAPE OF X IS: " + str(x.size()))
+        return x.reshape(x.size(0), -1)
 
 
 class CustomFixedCategorical(torch.distributions.Categorical):
