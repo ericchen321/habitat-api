@@ -21,6 +21,9 @@ from gym.spaces import Box
 
 from habitat.core.logging import logger
 from habitat.utils.visualizations.utils import images_to_video
+from habitat.utils.visualizations import maps
+from habitat.core.utils import try_cv2_import
+cv2 = try_cv2_import()
 
 class TensorboardWriter:
     def __init__(self, log_dir: str, *args: Any, **kwargs: Any):
@@ -374,3 +377,72 @@ def overwrite_gym_box_shape(box: Box, shape) -> Box:
     high = box.high if np.isscalar(box.high) else np.max(box.high)
     return Box(low=low, high=high, shape=shape, dtype=box.dtype)
 
+def generate_map_frame(env, obs_dim):
+    """Generates a map that displays the state of the agent in the given environment,
+    for the current frame.
+
+    Args:
+        env: sim environment.
+        obs_dim: dimension of observations.
+    Returns:
+        the height x width x 1 map
+    """
+    # draw map
+    top_down_map = maps.get_topdown_map(sim=env.sim, map_resolution=(1250, 1250, 1), num_samples=200)
+    # draw agent
+    # TODO: figure out how to convert quaternion to angles to get agent_rotation
+    top_down_map = maps.draw_agent(
+        image=top_down_map,
+        agent_center_coord=(1,1),
+        agent_rotation=0.0,
+        agent_radius_px=8,
+    )
+    # scale top down map to align with rgb view
+    old_h, old_w, _ = top_down_map.shape
+    top_down_height = obs_dim[0]
+    top_down_width = int(float(top_down_height) / old_h * old_w)
+    # cv2 resize (dsize is width first)
+    top_down_map = cv2.resize(
+        top_down_map,
+        (top_down_width, top_down_height),
+        interpolation=cv2.INTER_CUBIC,
+    )
+    top_down_map = np.expand_dims(top_down_map, axis=2)
+    
+    return top_down_map
+
+# utility function to draw a top-down map
+# copied from shortest_path_follower_example.py
+def draw_top_down_map(info, heading, output_size):
+    """Generates a map that displays the state of the agent in the given environment,
+    for the current frame.
+
+    Args:
+        info: environment info for current frame.
+        heading: where the agent heads toward.
+        output_size: height of output map.
+    Returns:
+        the output_size x width x 1 map
+    """
+    top_down_map = maps.colorize_topdown_map(
+        info["top_down_map"]["map"], info["top_down_map"]["fog_of_war_mask"]
+    )
+    original_map_size = top_down_map.shape[:2]
+    map_scale = np.array(
+        (1, original_map_size[1] * 1.0 / original_map_size[0])
+    )
+    new_map_size = np.round(output_size * map_scale).astype(np.int32)
+    # OpenCV expects w, h but map size is in h, w
+    top_down_map = cv2.resize(top_down_map, (new_map_size[1], new_map_size[0]))
+
+    map_agent_pos = info["top_down_map"]["agent_map_coord"]
+    map_agent_pos = np.round(
+        map_agent_pos * new_map_size / original_map_size
+    ).astype(np.int32)
+    top_down_map = maps.draw_agent(
+        top_down_map,
+        map_agent_pos,
+        heading - np.pi / 2,
+        agent_radius_px=top_down_map.shape[0] / 40,
+    )
+    return top_down_map

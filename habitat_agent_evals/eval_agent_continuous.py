@@ -47,6 +47,10 @@ def main():
     parser.add_argument(
         "--num-episodes", type=int, default=50
     )
+    # frame rate defines the number of frame per action you want for videos generated
+    parser.add_argument(
+        "--frame-rate", type=int, default=1
+    )
     # control period defines the amount of time an agent should take to complete
     # an action. Measured in seconds
     parser.add_argument(
@@ -61,13 +65,14 @@ def main():
     agent_config.INPUT_TYPE = args.input_type
     agent_config.MODEL_PATH = args.model_path
     num_episodes = args.num_episodes
+    frame_rate = args.frame_rate
     control_period = args.control_period
 
     agent = PPOAgent(agent_config)
     print("Establishing benchmark:")
     benchmark = habitat.Benchmark(config_paths=args.task_config, enable_physics=True)
     print("Evaluating:")
-    metrics = benchmark.evaluate(agent, num_episodes=num_episodes, control_period=control_period) # eval 50 episodes for now
+    metrics = benchmark.evaluate(agent, num_episodes=num_episodes, frame_rate=frame_rate, control_period=control_period) # eval 50 episodes for now
 
     for k, v in metrics.items():
         habitat.logger.info("{}: {:.3f}".format(k, v))

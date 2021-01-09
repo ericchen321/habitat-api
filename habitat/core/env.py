@@ -315,7 +315,7 @@ class Env:
         simulation environment.
         """
         # attach asset to agent
-        locobot_template_id = self._sim._sim.load_object_configs("/home/eric/habitat-sim-may-2020/habitat-sim/data/objects/locobot_merged")[0]
+        locobot_template_id = self._sim._sim.load_object_configs("data/objects/locobot_merged")[0]
         #print("locobot_template_id is " + str(locobot_template_id))
         self._id_agent_obj = self._sim._sim.add_object(locobot_template_id, self._sim._sim.agents[0].scene_node)
         #print("id of agent object is " + str(self._id_agent_obj))
@@ -468,6 +468,21 @@ class RLEnv(gym.Env):
 
         return observations, reward, done, info
 
+    def step_physics(
+        self, action: Union[int, str, Dict[str, Any]], time_step=1.0/60.0, control_period=1.0, **kwargs
+    ) -> Tuple[Observations, Any, bool, dict]:
+        r"""Perform an action in the environment, with physics enabled.
+
+        :return: :py:`(observations, reward, done, info)`
+        """
+
+        observations = self._env.step_physics(action=action, time_step=time_step, control_period=control_period, **kwargs)
+        reward = self.get_reward(observations)
+        done = self.get_done(observations)
+        info = self.get_info(observations)
+
+        return observations, reward, done, info
+    
     def seed(self, seed: Optional[int] = None) -> None:
         self._env.seed(seed)
 

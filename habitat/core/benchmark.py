@@ -15,10 +15,26 @@ from typing import Dict, Optional
 
 from habitat.config.default import get_config
 from habitat.core.agent import Agent
-from habitat.core.env import Env
+from habitat.core.env import Env, RLEnv
 
 # use TensorBoard to visualize
 from habitat_agent_evals.tensorboard_utils_new import TensorboardWriter, generate_video
+from habitat.utils.visualizations.utils import observations_to_image
+import numpy as np
+
+# created based on SimpleRLEnv from shortest_path_follower_example.py
+class BenchmarkingRLEnv(RLEnv):
+    def get_reward_range(self):
+        return [-1, 1]
+
+    def get_reward(self, observations):
+        return 0
+
+    def get_done(self, observations):
+        return self.habitat_env.episode_over
+
+    def get_info(self, observations):
+        return self.habitat_env.get_metrics()
 
 class Benchmark:
     r"""Benchmark for evaluating agents in environments.
@@ -33,6 +49,11 @@ class Benchmark:
         :param eval_remote: boolean indicating whether evaluation should be run remotely or locally
         """
         config_env = get_config(config_paths)
+        # embed top-down map and heading sensor in config
+        config_env.defrost()
+        config_env.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config_env.TASK.SENSORS.append("HEADING_SENSOR")
+        config_env.freeze()
         self._eval_remote = eval_remote
 
         self._enable_physics = enable_physics
@@ -40,7 +61,7 @@ class Benchmark:
         if self._eval_remote is True:
             self._env = None
         else:
-            self._env = Env(config=config_env)
+            self._env = BenchmarkingRLEnv(config=config_env)
 
 
     def remote_evaluate(
@@ -118,14 +139,14 @@ class Benchmark:
 
         return avg_metrics
 
-    def local_evaluate(self, agent: Agent, num_episodes: Optional[int] = None, control_period: Optional[float] = 1.0):
+    def local_evaluate(self, agent: Agent, num_episodes: Optional[int] = None, control_period: Optional[float] = 1.0, frame_rate: Optional[int] = 1):
         if num_episodes is None:
-            num_episodes = len(self._env.episodes)
+            num_episodes = len(self._env._env.episodes)
         else:
-            assert num_episodes <= len(self._env.episodes), (
+            assert num_episodes <= len(self._env._env.episodes), (
                 "num_episodes({}) is larger than number of episodes "
                 "in environment ({})".format(
-                    num_episodes, len(self._env.episodes)
+                    num_episodes, len(self._env._env.episodes)
                 )
             )
 
@@ -141,34 +162,51 @@ class Benchmark:
             print("working on episode " + str(count_episodes))
             observations_per_episode = []
             agent.reset()
-            observations_per_action = self._env.reset()
+            observations_per_action = self._env._env.reset()
             # initialize physic-enabled sim env. Do this for every
             # episode, since sometimes assets get deallocated
             if self._enable_physics:
-                self._env.disable_physics()
-                self._env.enable_physics()
+                self._env._env.disable_physics()
+                self._env._env.enable_physics()
             
-            while not self._env.episode_over:
+            frame_counter = 0
+            # act until one episode is over
+            while not self._env._env.episode_over:
                 action = agent.act(observations_per_action)
-                observations_per_action = None
+                observations_per_action = reward_per_action = done_per_action = info_per_action = None
                 if (self._enable_physics is False):
-                    observations_per_action = self._env.step(action)
+                    (observations_per_action, 
+                    reward_per_action, 
+                    done_per_action, 
+                    info_per_action)  = self._env.step(action)
                 else:
                     # step with physics. For now we use hard-coded time step of 1/60 secs
                     # (used in the rigid object tutorial in Habitat Sim)
-                    observations_per_action = self._env.step_physics(action, time_step=1.0/60.0, control_period=control_period)
-                observations_per_episode.append(observations_per_action["depth"])
+                    (observations_per_action, 
+                    reward_per_action, 
+                    done_per_action, 
+                    info_per_action) = self._env.step_physics(
+                        action, time_step=1.0/60.0, control_period=control_period)
+                # generate an output image for the action. The image includes observations
+                # and a top-down map showing the agent's state in the environment
+                # we use frame_rate (num. of frames per action) to reduce computational overhead
+                if frame_counter % frame_rate == 0:
+                    out_im_per_action = observations_to_image(observations_per_action, info_per_action)
+                    observations_per_episode.append(out_im_per_action)
+                frame_counter = frame_counter + 1
             
             # episode ended
-            # calculate metrics so far
-            metrics = self._env.get_metrics()
-            for m, v in metrics.items():
+            # get per-episode metrics. for now we only extract
+            # distance-to-goal, success, spl
+            metrics = self._env._env.get_metrics()
+            per_ep_metrics = {k: metrics[k] for k in ['distance_to_goal', 'success', 'spl']}
+            # print distance_to_goal, success and spl
+            for k, v in per_ep_metrics.items():
+                print(f'{k},{v}')
+            # calculate aggregated distance_to_goal, success and spl
+            for m, v in per_ep_metrics.items():
                 agg_metrics[m] += v
             count_episodes += 1
-            for k, v in agg_metrics.items():
-                print(f'{k},{v}')
-            # running average
-            avg_metrics_running = {k: v / count_episodes for k, v in agg_metrics.items()}
             # generate video
             generate_video(
                 video_option=["disk", "tensorboard"],
@@ -176,16 +214,16 @@ class Benchmark:
                 images=observations_per_episode,
                 episode_id=count_episodes-1,
                 checkpoint_idx=0,
-                metrics=avg_metrics_running,
+                metrics=per_ep_metrics,
                 tb_writer=writer,
             )
-
+            
         avg_metrics = {k: v / count_episodes for k, v in agg_metrics.items()}
 
         return avg_metrics
 
     def evaluate(
-        self, agent: Agent, num_episodes: Optional[int] = None, control_period: Optional[float] = 1.0
+        self, agent: Agent, num_episodes: Optional[int] = None, frame_rate: Optional[int] = 1, control_period: Optional[float] = 1.0
     ) -> Dict[str, float]:
         r"""..
 
@@ -198,4 +236,4 @@ class Benchmark:
         if self._eval_remote is True:
             return self.remote_evaluate(agent, num_episodes)
         else:
-            return self.local_evaluate(agent, num_episodes)
+            return self.local_evaluate(agent, num_episodes, control_period, frame_rate)

@@ -44,6 +44,13 @@ def main():
     parser.add_argument(
         "--task-config", type=str, default="configs/tasks/pointnav.yaml"
     )
+    parser.add_argument(
+        "--num-episodes", type=int, default=50
+    )
+    # frame rate defines the number of frame per action you want for videos generated
+    parser.add_argument(
+        "--frame-rate", type=int, default=1
+    )
     args = parser.parse_args()
 
     config = get_config(args.task_config)
@@ -51,12 +58,14 @@ def main():
     agent_config = get_default_config()
     agent_config.INPUT_TYPE = args.input_type
     agent_config.MODEL_PATH = args.model_path
+    num_episodes = args.num_episodes
+    frame_rate = args.frame_rate
 
     agent = PPOAgent(agent_config)
     print("Establishing benchmark:")
     benchmark = habitat.Benchmark(config_paths=args.task_config)
     print("Evaluating:")
-    metrics = benchmark.evaluate(agent, num_episodes=50) # eval 50 episodes for now
+    metrics = benchmark.evaluate(agent, num_episodes=num_episodes, frame_rate=frame_rate)
 
     for k, v in metrics.items():
         habitat.logger.info("{}: {:.3f}".format(k, v))
