@@ -24,7 +24,7 @@ Run `eval_agent_continuous.py` and specify evaluation parameters such as agent's
 habitat_agent_evals/eval_agent_continuous.py --input-type depth --model-path data/checkpoints/depth_new.pth --task-config configs/tasks/pointnav.yaml --num-episodes 50 --frame-rate=10 --control-period 1.0 
 ```
 
-**TensorBoard and Video Generation Support**
+### TensorBoard and Video Generation Support
 You can check the sensor inputs from an agent, as well as a top-down map showing the agent's navigation steps by running TensorBoard:
 ```bash
 tensorboard --logdir=tb_benchmark_dir/
