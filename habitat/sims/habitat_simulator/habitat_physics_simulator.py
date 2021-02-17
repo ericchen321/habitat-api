@@ -37,7 +37,7 @@ def overwrite_config_to_lower(config_from: Config, config_to: Any) -> None:
             setattr(config_to, attr.lower(), if_config_to_lower(value))
 
 
-@registry.register_simulator(name="Sim-v0")
+@registry.register_simulator(name="Sim-v2")
 class HabitatPhysicsSim(Simulator):
     r"""Simulator wrapper over habitat-sim
 

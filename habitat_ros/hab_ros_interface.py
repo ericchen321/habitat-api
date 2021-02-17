@@ -38,7 +38,7 @@ class sim_env(threading.Thread):
 
     def __init__(self, env_config_file):
         threading.Thread.__init__(self)
-        self.env = habitat.Env(config=habitat.get_config(env_config_file))
+        self.env = habitat.PhysicsEnv(config=habitat.get_config(env_config_file))
         # always assume height equals width
         self._sensor_resolution = {
             "RGB": self.env._sim.config["RGB_SENSOR"]["HEIGHT"],
@@ -135,7 +135,7 @@ class sim_env(threading.Thread):
             depth_pointgoal_np = np.concatenate((depth_np, pointgoal_np))
             self._pub_depth_and_pointgoal.publish(np.float32(depth_pointgoal_np))
             self._r.sleep()
-    
+
     def update_observations(self):
         sim_obs = self.env._sim._sim.get_sensor_observations()
         self.observations = self.env._sim._sensor_suite.get_observations(sim_obs)
@@ -148,7 +148,6 @@ class sim_env(threading.Thread):
 
 def callback(vel, my_env):
     lock.acquire()
-    
     pos = my_env.env.sim.get_agent_state(0).position
     # print(f"agent's position: {pos}.")
     my_env.vel_control.linear_velocity = np.array([(-1.0 * vel.linear.y), 0.0, vel.linear.x])
