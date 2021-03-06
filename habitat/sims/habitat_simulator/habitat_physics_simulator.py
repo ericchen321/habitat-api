@@ -64,6 +64,7 @@ class HabitatPhysicsSim(Simulator):
         self._sensor_suite = SensorSuite(sim_sensors)
         self.sim_config = self.create_sim_config(self._sensor_suite)
         self._current_scene = self.sim_config.sim_cfg.scene.id
+        # self._sim = habitat_sim.Simulator(self.sim_config)
         self._sim = habitat_sim.PhysicsSimulator(self.sim_config)
         self._action_space = spaces.Discrete(
             len(self.sim_config.agents[0].action_space)

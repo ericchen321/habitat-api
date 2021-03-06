@@ -9,6 +9,7 @@ import rospy
 from rospy.numpy_msg import numpy_msg
 from rospy_tutorials.msg import Floats
 from geometry_msgs.msg import Twist
+from habitat.config import Config
 import threading
 import sys
 
@@ -38,39 +39,64 @@ class sim_env(threading.Thread):
 
     def __init__(self, env_config_file):
         threading.Thread.__init__(self)
-        self.env = habitat.PhysicsEnv(config=habitat.get_config(env_config_file))
+        self.config = habitat.get_config(env_config_file)
+        self.overwrite_simulator_config()
+        self.env = habitat.PhysicsEnv(config=self.config)
         # always assume height equals width
         self._sensor_resolution = {
             "RGB": self.env._sim.config["RGB_SENSOR"]["HEIGHT"],
             "DEPTH": self.env._sim.config["DEPTH_SENSOR"]["HEIGHT"],
             "BC_SENSOR": self.env._sim.config["BC_SENSOR"]["HEIGHT"],
         }
-        self.env._sim._sim.agents[0].move_filter_fn = self.env._sim._sim._step_filter
+        self.env._sim._sim.agents[
+            0
+        ].move_filter_fn = self.env._sim._sim._step_filter
         self.observations = self.env.reset()
 
         # add a sphere
         # load some object templates from configuration files
         sphere_template_id = self.env._sim._sim.load_object_configs(
-            str("/home/eric/habitat-sim-may-2020/habitat-sim/data/test_assets/objects/sphere"))[0]
+            str(
+                "/home/lci-user/Desktop/workspace/src/habitat-sim/data/test_assets/objects/sphere"
+            )
+        )[0]
         id_sphere = self.env._sim._sim.add_object(sphere_template_id)
-        self.env._sim._sim.set_translation(np.array([-2.63,0.114367,19.3]), id_sphere)
+        self.env._sim._sim.set_translation(
+            np.array([-2.63, 0.114367, 19.3]), id_sphere
+        )
 
         # load and initialize the lobot_merged asset
-        locobot_template_id = self.env._sim._sim.load_object_configs("/home/eric/habitat-sim-may-2020/habitat-sim/data/objects/locobot_merged")[0]
+        locobot_template_id = self.env._sim._sim.load_object_configs(
+            "/home/lci-user/Desktop/workspace/src/habitat-sim/data/objects/locobot_merged"
+        )[0]
         # print("locobot_template_id is " + str(locobot_template_id))
         # add robot object to the scene with the agent/camera SceneNode attached
-        self.id_agent_obj = self.env._sim._sim.add_object(locobot_template_id, self.env._sim._sim.agents[0].scene_node)
+        self.id_agent_obj = self.env._sim._sim.add_object(
+            locobot_template_id, self.env._sim._sim.agents[0].scene_node
+        )
         # print("id of agent object is " + str(self.id_agent_obj))
         # set the agent's body to dynamic
-        self.env._sim._sim.set_object_motion_type(hsim.physics.MotionType.DYNAMIC, self.id_agent_obj)
+        self.env._sim._sim.set_object_motion_type(
+            hsim.physics.MotionType.DYNAMIC, self.id_agent_obj
+        )
 
         self.env._sim._sim.agents[0].state.velocity = np.float32([0, 0, 0])
-        self.env._sim._sim.agents[0].state.angular_velocity = np.float32([0, 0, 0])
-        self.vel_control = self.env._sim._sim.get_object_velocity_control(self.id_agent_obj)
-        self.env._sim._sim.set_translation(np.array([-1.7927,0.114367,19.1552]), self.id_agent_obj)
+        self.env._sim._sim.agents[0].state.angular_velocity = np.float32(
+            [0, 0, 0]
+        )
+        self.vel_control = self.env._sim._sim.get_object_velocity_control(
+            self.id_agent_obj
+        )
+        self.env._sim._sim.set_translation(
+            np.array([-1.7927, 0.114367, 19.1552]), self.id_agent_obj
+        )
 
-        self._pub_rgb = rospy.Publisher("~rgb", numpy_msg(Floats), queue_size=1)
-        self._pub_depth = rospy.Publisher("~depth", numpy_msg(Floats), queue_size=1)
+        self._pub_rgb = rospy.Publisher(
+            "~rgb", numpy_msg(Floats), queue_size=1
+        )
+        self._pub_depth = rospy.Publisher(
+            "~depth", numpy_msg(Floats), queue_size=1
+        )
 
         # additional RGB sensor I configured
         self._pub_bc_sensor = rospy.Publisher(
@@ -84,8 +110,8 @@ class sim_env(threading.Thread):
 
     def run(self):
         """Publish sensor readings through ROS on a different thread.
-            This method defines what the thread does when the start() method
-            of the threading class is called
+        This method defines what the thread does when the start() method
+        of the threading class is called
         """
         while not rospy.is_shutdown():
             lock.acquire()
@@ -94,7 +120,10 @@ class sim_env(threading.Thread):
                 (
                     np.float32(self.observations["rgb"].ravel()),
                     np.array(
-                        [self._sensor_resolution["RGB"], self._sensor_resolution["RGB"]]
+                        [
+                            self._sensor_resolution["RGB"],
+                            self._sensor_resolution["RGB"],
+                        ]
                     ),
                 )
             )
@@ -125,7 +154,9 @@ class sim_env(threading.Thread):
             )
 
             depth_np = np.float32(self.observations["depth"].ravel())
-            pointgoal_np = np.float32(self.observations["pointgoal_with_gps_compass"].ravel())
+            pointgoal_np = np.float32(
+                self.observations["pointgoal_with_gps_compass"].ravel()
+            )
             lock.release()
 
             self._pub_rgb.publish(np.float32(rgb_with_res))
@@ -133,24 +164,56 @@ class sim_env(threading.Thread):
             self._pub_bc_sensor.publish(np.float32(bc_sensor_with_res))
 
             depth_pointgoal_np = np.concatenate((depth_np, pointgoal_np))
-            self._pub_depth_and_pointgoal.publish(np.float32(depth_pointgoal_np))
+            self._pub_depth_and_pointgoal.publish(
+                np.float32(depth_pointgoal_np)
+            )
             self._r.sleep()
 
     def update_observations(self):
         sim_obs = self.env._sim._sim.get_sensor_observations()
-        self.observations = self.env._sim._sensor_suite.get_observations(sim_obs)
+        self.observations = self.env._sim._sensor_suite.get_observations(
+            sim_obs
+        )
         self.observations.update(
             self.env._task.sensor_suite.get_observations(
-                observations=self.observations, episode=self.env.current_episode
+                observations=self.observations,
+                episode=self.env.current_episode,
             )
         )
+
+    def overwrite_simulator_config(self):
+        for k in self.config.PHYSICS_SIMULATOR.keys():
+            if isinstance(self.config.PHYSICS_SIMULATOR[k], Config):
+                for inner_k in self.config.PHYSICS_SIMULATOR[k].keys():
+                    self.config.SIMULATOR[k][
+                        inner_k
+                    ] = self.config.PHYSICS_SIMULATOR[k][inner_k]
+            else:
+                self.config.SIMULATOR[k] = self.config.PHYSICS_SIMULATOR[k]
+        try:
+            from habitat.sims.habitat_simulator.habitat_simulator import (
+                HabitatSim,
+            )
+            from habitat.sims.habitat_simulator.habitat_physics_simulator import (
+                HabitatPhysicsSim,
+            )
+            from habitat.sims.habitat_simulator.actions import (
+                HabitatSimV1ActionSpaceConfiguration,
+            )
+        except ImportError as e:
+            print("Import HSIM failed")
+            raise e
+
+        return
 
 
 def callback(vel, my_env):
     lock.acquire()
     pos = my_env.env.sim.get_agent_state(0).position
     # print(f"agent's position: {pos}.")
-    my_env.vel_control.linear_velocity = np.array([(-1.0 * vel.linear.y), 0.0, vel.linear.x])
+    my_env.vel_control.linear_velocity = np.array(
+        [(-1.0 * vel.linear.y), 0.0, vel.linear.x]
+    )
     my_env.vel_control.angular_velocity = np.array([0.0, vel.angular.z, 0])
     my_env.vel_control.controlling_lin_vel = True
     my_env.vel_control.controlling_ang_vel = True
@@ -180,6 +243,7 @@ def main():
         my_env.update_observations()
         lock.release()
         rate.sleep()
+
 
 if __name__ == "__main__":
     main()
